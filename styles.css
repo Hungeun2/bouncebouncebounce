@@ -1,0 +1,240 @@
+:root {
+  color-scheme: dark;
+  --bg: #08080a;
+  --panel: #151417;
+  --line: #363139;
+  --text: #f3eadf;
+  --muted: #b9aa9f;
+  --tile: #c77d57;
+  --tile-dark: #6e3d31;
+  --aqua: #66d9c7;
+  --gold: #f6c35f;
+  --danger: #ff6f5d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(102, 217, 199, 0.12), transparent 32%),
+    radial-gradient(circle at 82% 86%, rgba(246, 195, 95, 0.14), transparent 28%),
+    var(--bg);
+  color: var(--text);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  touch-action: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+}
+
+.game-stage {
+  width: min(100%, 1040px);
+  height: min(100dvh - 28px, 760px);
+  min-height: 560px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.hud {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 28%, #fff4cf 0 11%, transparent 12%),
+    radial-gradient(circle at 50% 54%, var(--gold) 0 34%, #c4513f 35% 100%);
+  box-shadow: 0 0 0 2px #1f1b1d, 0 0 18px rgba(246, 195, 95, 0.35);
+  flex: none;
+}
+
+.stage-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  gap: 6px;
+}
+
+.stage-tab,
+.icon-button,
+.control-button {
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: rgba(21, 20, 23, 0.88);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.stage-tab {
+  width: 42px;
+  height: 38px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.stage-tab.is-active {
+  border-color: var(--aqua);
+  color: #04110f;
+  background: var(--aqua);
+  font-weight: 800;
+}
+
+.icon-button {
+  width: 42px;
+  height: 38px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.canvas-wrap {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(246, 195, 95, 0.25);
+  border-radius: 8px;
+  background: #020203;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.32);
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  background: #020203;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  max-width: min(86%, 440px);
+  transform: translateX(-50%) translateY(-10px);
+  opacity: 0;
+  pointer-events: none;
+  padding: 10px 14px;
+  border: 1px solid rgba(102, 217, 199, 0.38);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(10, 10, 11, 0.9);
+  text-align: center;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.mobile-controls {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: 10px;
+  min-height: 66px;
+}
+
+.control-button {
+  height: 64px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.control-button.boost {
+  border-color: rgba(246, 195, 95, 0.72);
+  color: #171006;
+  background: linear-gradient(180deg, #ffe08f, var(--gold));
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.control-button:active,
+.control-button.is-pressed {
+  transform: translateY(1px);
+  filter: brightness(1.08);
+}
+
+@media (max-width: 700px) {
+  .shell {
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .game-stage {
+    height: calc(100dvh - 16px);
+    min-height: 0;
+    gap: 8px;
+  }
+
+  .hud {
+    min-height: 42px;
+    gap: 8px;
+  }
+
+  .brand strong {
+    font-size: 14px;
+  }
+
+  .brand-mark {
+    width: 20px;
+    height: 20px;
+  }
+
+  .stage-tabs {
+    grid-template-columns: repeat(3, 36px);
+    gap: 5px;
+  }
+
+  .stage-tab,
+  .icon-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .mobile-controls {
+    min-height: 58px;
+  }
+
+  .control-button {
+    height: 58px;
+  }
+}

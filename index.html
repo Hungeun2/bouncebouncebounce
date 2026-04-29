@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Bounce Blocks" />
+    <title>Bounce Blocks</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="game-stage" aria-label="Bounce Blocks game">
+        <div class="hud">
+          <div class="brand">
+            <span class="brand-mark"></span>
+            <strong>Bounce Blocks</strong>
+          </div>
+          <div class="stage-tabs" aria-label="Stage select">
+            <button class="stage-tab is-active" type="button" data-stage="0">1</button>
+            <button class="stage-tab" type="button" data-stage="1">2</button>
+            <button class="stage-tab" type="button" data-stage="2">3</button>
+          </div>
+          <button class="icon-button" id="resetButton" type="button" aria-label="Restart stage" title="Restart stage">
+            ↻
+          </button>
+        </div>
+
+        <div class="canvas-wrap">
+          <canvas id="gameCanvas" width="960" height="640" aria-label="Bouncing ball game canvas"></canvas>
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        </div>
+
+        <div class="mobile-controls" aria-label="Game controls">
+          <button class="control-button" id="leftButton" type="button" aria-label="Move left">←</button>
+          <button class="control-button boost" id="boostButton" type="button" aria-label="Bounce boost">BOOST</button>
+          <button class="control-button" id="rightButton" type="button" aria-label="Move right">→</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="./game.js"></script>
+  </body>
+</html>
