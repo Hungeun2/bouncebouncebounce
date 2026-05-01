@@ -154,3 +154,11 @@ sudo certbot --nginx -d your-domain.com
 - Health endpoint: `/api/health`
 - Readiness endpoint: `/api/ready`
 - 종료 시 `ratings.json` 자동 flush (graceful shutdown)
+
+## Git Helper
+
+루트에서 아래처럼 실행하면 됩니다.
+
+```bash
+./commit -m "message"
+```

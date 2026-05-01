@@ -329,6 +329,28 @@ async function toggleQueue() {
   }
 }
 
+async function leaveCurrentSession() {
+  try {
+    if (state.queue.inQueue) {
+      await api("/api/queue/leave", { method: "POST", body: { playerId: state.playerId } });
+    }
+    if (state.socket?.readyState === WebSocket.OPEN) {
+      state.socket.close();
+    }
+  } catch {
+    // ignore leave errors and reset locally
+  } finally {
+    input.left = false;
+    input.right = false;
+    input.boost = false;
+    state.match = null;
+    state.predicted = null;
+    state.queue = { inQueue: false, playersWaiting: 0, position: null };
+    setOverlay("QUEUE UP TO START");
+    updatePanels();
+  }
+}
+
 function bindControls() {
   bindHold(document.querySelector("#leftButton"), "left");
   bindHold(document.querySelector("#rightButton"), "right");
@@ -343,15 +365,7 @@ function bindControls() {
 
   leaveButton.addEventListener("click", async () => {
     try {
-      if (state.queue.inQueue) {
-        await api("/api/queue/leave", { method: "POST", body: { playerId: state.playerId } });
-      }
-      if (state.socket?.readyState === WebSocket.OPEN) {
-        state.socket.close();
-      }
-      state.match = null;
-      state.predicted = null;
-      updatePanels();
+      await leaveCurrentSession();
     } catch (error) {
       queueStatus.textContent = error.message || "나가는 중 오류가 발생했습니다.";
     }
@@ -372,6 +386,12 @@ function bindControls() {
     if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") input.left = false;
     if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") input.right = false;
     sendInput();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      void leaveCurrentSession();
+    }
   });
 }
 
