@@ -6,8 +6,12 @@ const NICK_KEY = "bounce_online_nickname";
 const canvas = document.querySelector("#gameCanvas");
 const ctx = canvas.getContext("2d");
 const queueButton = document.querySelector("#queueButton");
+const leaveButton = document.querySelector("#leaveButton");
 const nicknameInput = document.querySelector("#nicknameInput");
 const queueStatus = document.querySelector("#queueStatus");
+const lobbyPanel = document.querySelector("#lobbyPanel");
+const gamePanel = document.querySelector("#gamePanel");
+const touchHud = document.querySelector("#touchHud");
 const mapLabel = document.querySelector("#mapLabel");
 const timerLabel = document.querySelector("#timerLabel");
 const queueLabel = document.querySelector("#queueLabel");
@@ -29,6 +33,8 @@ const state = {
   connected: false,
   socket: null,
   reconnectTimer: null,
+  predicted: null,
+  lastInputAt: 0,
   justFinishedMatchId: null,
 };
 
@@ -167,6 +173,11 @@ function renderOrderedList(target, rows, formatter) {
 }
 
 function updatePanels() {
+  const inMatch = state.match?.status === "running";
+  lobbyPanel.classList.toggle("is-hidden", inMatch);
+  gamePanel.classList.toggle("is-hidden", !inMatch);
+  touchHud.classList.toggle("is-hidden", !inMatch);
+
   if (state.profile) {
     gradeChip.textContent = state.profile.grade;
     ratingChip.textContent = `${state.profile.rating} RP`;
@@ -217,6 +228,21 @@ function updateFromServer(payload) {
   state.match = payload.match;
   state.globalTop = payload.globalTop;
 
+  if (state.match?.status === "running") {
+    const me = state.match.players.find((player) => player.playerId === state.playerId);
+    if (me) {
+      state.predicted = {
+        x: me.x,
+        y: me.y,
+        vx: me.vx,
+        vy: me.vy,
+        grounded: false,
+      };
+    }
+  } else {
+    state.predicted = null;
+  }
+
   if (!state.match && state.justFinishedMatchId) {
     state.justFinishedMatchId = null;
   }
@@ -227,6 +253,24 @@ function updateFromServer(payload) {
 
   renderLists();
   updatePanels();
+}
+
+function integratePrediction(dt) {
+  if (!state.match || state.match.status !== "running" || !state.predicted) return;
+  const map = state.match.map;
+  const player = state.predicted;
+  const accel = player.grounded ? PHYSICS.groundAccel : PHYSICS.airAccel;
+  if (input.left) player.vx -= accel * dt;
+  if (input.right) player.vx += accel * dt;
+  player.vx = clamp(player.vx * PHYSICS.friction, -PHYSICS.maxVx, PHYSICS.maxVx);
+  if (input.boost && player.grounded) {
+    player.vy = -PHYSICS.boostImpulse;
+    player.grounded = false;
+  }
+  player.vy += PHYSICS.gravity * dt;
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+  player.x = clamp(player.x, PHYSICS.playerRadius, map.width - PHYSICS.playerRadius);
 }
 
 function bindHold(button, key) {
@@ -254,6 +298,21 @@ function bindHold(button, key) {
   });
 }
 
+function sendInput() {
+  if (state.match?.status !== "running") return;
+  const now = performance.now();
+  if (now - state.lastInputAt < 24) return;
+  state.lastInputAt = now;
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({ type: "input", ...input }));
+    return;
+  }
+  api("/api/input", {
+    method: "POST",
+    body: { playerId: state.playerId, ...input },
+  }).catch(() => {});
+}
+
 async function toggleQueue() {
   if (state.match?.status === "running") return;
   const nickname = sanitizeNick(nicknameInput.value);
@@ -270,28 +329,31 @@ async function toggleQueue() {
   }
 }
 
-function sendInput() {
-  if (state.match?.status !== "running") return;
-  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-    state.socket.send(JSON.stringify({ type: "input", ...input }));
-    return;
-  }
-  api("/api/input", {
-    method: "POST",
-    body: { playerId: state.playerId, ...input },
-  }).catch(() => {});
-}
-
 function bindControls() {
   bindHold(document.querySelector("#leftButton"), "left");
   bindHold(document.querySelector("#rightButton"), "right");
-  bindHold(document.querySelector("#boostButton"), "boost");
 
   queueButton.addEventListener("click", async () => {
     try {
       await toggleQueue();
     } catch (error) {
       queueStatus.textContent = error.message || "매칭 처리 중 오류가 발생했습니다.";
+    }
+  });
+
+  leaveButton.addEventListener("click", async () => {
+    try {
+      if (state.queue.inQueue) {
+        await api("/api/queue/leave", { method: "POST", body: { playerId: state.playerId } });
+      }
+      if (state.socket?.readyState === WebSocket.OPEN) {
+        state.socket.close();
+      }
+      state.match = null;
+      state.predicted = null;
+      updatePanels();
+    } catch (error) {
+      queueStatus.textContent = error.message || "나가는 중 오류가 발생했습니다.";
     }
   });
 
@@ -304,19 +366,11 @@ function bindControls() {
   window.addEventListener("keydown", (event) => {
     if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") input.left = true;
     if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") input.right = true;
-    if (event.key === " " || event.key === "ArrowUp" || event.key.toLowerCase() === "w") {
-      input.boost = true;
-      event.preventDefault();
-    }
     sendInput();
   });
   window.addEventListener("keyup", (event) => {
     if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") input.left = false;
     if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") input.right = false;
-    if (event.key === " " || event.key === "ArrowUp" || event.key.toLowerCase() === "w") {
-      input.boost = false;
-      event.preventDefault();
-    }
     sendInput();
   });
 }
@@ -420,18 +474,16 @@ function drawPlayer(player, isMe) {
 
 function drawMatch(match) {
   const map = match.map;
-  const me = match.players.find((player) => player.playerId === state.playerId);
+  const me = state.predicted || match.players.find((player) => player.playerId === state.playerId);
   const sx = canvas.width / map.width;
   const sy = canvas.height / map.height;
   const scale = Math.min(1.2, Math.max(sx, sy));
   const visibleWidth = canvas.width / scale;
-  const visibleHeight = canvas.height / scale;
-
-  const targetCam = clamp((me?.x ?? 0) - visibleWidth * 0.32, 0, map.width - visibleWidth);
-  state.cameraX += (targetCam - state.cameraX) * 0.2;
+  const targetCam = clamp((me?.x ?? 0) - visibleWidth * 0.38, 0, map.width - visibleWidth);
+  state.cameraX = targetCam;
 
   const offsetX = (canvas.width - visibleWidth * scale) / 2;
-  const offsetY = (canvas.height - visibleHeight * scale) / 2;
+  const offsetY = (canvas.height - map.height * scale) / 2;
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -498,6 +550,14 @@ async function init() {
   window.setInterval(() => {
     if (state.socket?.readyState !== WebSocket.OPEN) connectSocket();
   }, 3000);
+  let last = performance.now();
+  const predictionLoop = (now) => {
+    const dt = Math.min(0.033, (now - last) / 1000 || 0);
+    last = now;
+    integratePrediction(dt);
+    requestAnimationFrame(predictionLoop);
+  };
+  requestAnimationFrame(predictionLoop);
 }
 
 init();

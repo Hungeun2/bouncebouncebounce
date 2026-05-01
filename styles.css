@@ -47,7 +47,7 @@ input {
   width: min(100%, 1120px);
   height: min(100dvh - 20px, 920px);
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 10px;
 }
 
@@ -96,15 +96,27 @@ input {
   color: #136a64;
 }
 
-.queue-panel {
+.panel {
   display: grid;
-  grid-template-columns: auto minmax(120px, 1fr) auto;
-  align-items: center;
-  gap: 8px;
   padding: 10px;
   border: 1px solid rgba(219, 208, 194, 0.9);
   border-radius: 8px;
   background: var(--panel);
+}
+
+.panel-lobby {
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-game {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.is-hidden {
+  display: none;
 }
 
 .nick-field {
@@ -144,17 +156,15 @@ input {
   color: var(--ink-muted);
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
 .stat {
   border: 1px solid rgba(219, 208, 194, 0.9);
   border-radius: 8px;
   background: var(--panel-strong);
   padding: 9px 10px;
+}
+
+.stat-wide {
+  grid-column: 1 / -1;
 }
 
 .stat-label {
@@ -167,35 +177,21 @@ input {
   font-size: 18px;
 }
 
-.canvas-wrap {
+.game-shell {
+  grid-column: 1 / -1;
   position: relative;
   min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(219, 208, 194, 0.9);
   border-radius: 8px;
   background: #f8e8d2;
+  min-height: 320px;
 }
 
 canvas {
   width: 100%;
   height: 100%;
   display: block;
-}
-
-.overlay {
-  position: absolute;
-  left: 50%;
-  top: 12px;
-  transform: translateX(-50%);
-  border: 1px solid rgba(31, 138, 131, 0.45);
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-weight: 700;
-  font-size: 13px;
-  background: rgba(255, 248, 239, 0.9);
-  color: #195b57;
-  max-width: 88%;
-  text-align: center;
 }
 
 .leaderboards {
@@ -226,35 +222,47 @@ canvas {
   font-size: 13px;
 }
 
-.mobile-controls {
+.touch-hud {
+  position: relative;
   display: grid;
-  grid-template-columns: 1fr 1.2fr 1fr;
-  gap: 8px;
-  min-height: 62px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 120px;
 }
 
-.control {
-  height: 62px;
+.touch-zone {
+  min-height: 120px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 248, 239, 0.95);
   color: var(--ink);
   font-size: 28px;
   font-weight: 800;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
-.control.boost {
-  font-size: 15px;
-  letter-spacing: 0;
-  color: #fffaf5;
-  border-color: #d07334;
-  background: linear-gradient(180deg, #e88e40, #c7652f);
+.touch-zone.left::after {
+  content: "TAP LEFT";
 }
 
-.control.is-pressed,
-.control:active {
+.touch-zone.right::after {
+  content: "TAP RIGHT";
+}
+
+.leave-button {
+  grid-column: 1 / -1;
+  height: 42px;
+  border: 1px solid #c96f63;
+  border-radius: 8px;
+  background: #fff4f1;
+  color: #9b4b41;
+  font-weight: 800;
+}
+
+.leave-button:active {
   transform: translateY(1px);
-  filter: brightness(0.98);
 }
 
 @media (max-width: 860px) {
@@ -271,7 +279,7 @@ canvas {
     font-size: 15px;
   }
 
-  .queue-panel {
+  .panel-lobby {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -293,5 +301,13 @@ canvas {
 
   .board {
     min-height: 94px;
+  }
+
+  .touch-hud {
+    min-height: 96px;
+  }
+
+  .touch-zone {
+    min-height: 96px;
   }
 }

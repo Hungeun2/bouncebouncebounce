@@ -688,6 +688,18 @@ async function handleApi(req, res, urlObj) {
         return;
       }
       removeFromQueue(player.playerId);
+      const matchId = playerToMatch.get(player.playerId);
+      if (matchId) {
+        const match = matches.get(matchId);
+        if (match) {
+          match.players.delete(player.playerId);
+          playerToMatch.delete(player.playerId);
+          if (match.status === "running" && match.players.size === 0) {
+            finalizeMatch(match, "all-left");
+          }
+          broadcastMatch(match);
+        }
+      }
       sendJson(res, 200, { ok: true, queued: false });
       sendSocketState(player.playerId);
     } catch {

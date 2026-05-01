@@ -25,14 +25,14 @@
           </div>
         </header>
 
-        <section class="queue-panel">
+        <section class="panel panel-lobby" id="lobbyPanel">
           <label class="nick-field" for="nicknameInput">닉네임</label>
           <input id="nicknameInput" maxlength="16" autocomplete="off" spellcheck="false" />
           <button id="queueButton" type="button">매칭 시작</button>
           <p class="queue-status" id="queueStatus">매칭 버튼을 눌러 레이스를 시작하세요.</p>
         </section>
 
-        <section class="stats-row">
+        <section class="panel panel-game is-hidden" id="gamePanel">
           <div class="stat">
             <span class="stat-label">Map</span>
             <strong id="mapLabel">Waiting</strong>
@@ -45,11 +45,14 @@
             <span class="stat-label">Queue</span>
             <strong id="queueLabel">0명</strong>
           </div>
-        </section>
-
-        <section class="canvas-wrap">
-          <canvas id="gameCanvas" width="1280" height="720" aria-label="Online bounce race"></canvas>
-          <div class="overlay" id="overlayText">QUEUE UP TO START</div>
+          <div class="stat stat-wide">
+            <span class="stat-label">Status</span>
+            <strong id="overlayText">QUEUE UP TO START</strong>
+          </div>
+          <div class="game-shell">
+            <canvas id="gameCanvas" width="1280" height="720" aria-label="Online bounce race"></canvas>
+          </div>
+          <button class="leave-button" id="leaveButton" type="button">나가기</button>
         </section>
 
         <section class="leaderboards">
@@ -63,10 +66,9 @@
           </article>
         </section>
 
-        <section class="mobile-controls" aria-label="Game controls">
-          <button class="control" id="leftButton" type="button" aria-label="Move left">←</button>
-          <button class="control boost" id="boostButton" type="button" aria-label="Bounce boost">BOOST</button>
-          <button class="control" id="rightButton" type="button" aria-label="Move right">→</button>
+        <section class="touch-hud" id="touchHud" aria-label="Game controls">
+          <button class="touch-zone left" id="leftButton" type="button" aria-label="Move left"></button>
+          <button class="touch-zone right" id="rightButton" type="button" aria-label="Move right"></button>
         </section>
       </section>
     </main>
