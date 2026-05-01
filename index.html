@@ -3,45 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="theme-color" content="#f9efe3" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Bounce Blocks" />
-    <title>Bounce Blocks</title>
+    <meta name="apple-mobile-web-app-title" content="Bounce Arena" />
+    <title>Bounce Arena</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="shell">
-      <section class="game-stage" aria-label="Bounce Blocks game">
-        <div class="hud">
+      <section class="arena">
+        <header class="topbar">
           <div class="brand">
-            <span class="brand-mark"></span>
-            <strong>Bounce Blocks</strong>
+            <span class="brand-dot"></span>
+            <strong>Bounce Arena</strong>
           </div>
-          <div class="stage-tabs" aria-label="Stage select">
-            <button class="stage-tab is-active" type="button" data-stage="0">1</button>
-            <button class="stage-tab" type="button" data-stage="1">2</button>
-            <button class="stage-tab" type="button" data-stage="2">3</button>
+          <div class="chips">
+            <span class="chip" id="gradeChip">Bronze</span>
+            <span class="chip accent" id="ratingChip">600 RP</span>
           </div>
-          <button class="icon-button" id="resetButton" type="button" aria-label="Restart stage" title="Restart stage">
-            ↻
-          </button>
-        </div>
+        </header>
 
-        <div class="canvas-wrap">
-          <canvas id="gameCanvas" width="960" height="640" aria-label="Bouncing ball game canvas"></canvas>
-          <div class="toast" id="toast" role="status" aria-live="polite"></div>
-        </div>
+        <section class="queue-panel">
+          <label class="nick-field" for="nicknameInput">닉네임</label>
+          <input id="nicknameInput" maxlength="16" autocomplete="off" spellcheck="false" />
+          <button id="queueButton" type="button">매칭 시작</button>
+          <p class="queue-status" id="queueStatus">매칭 버튼을 눌러 레이스를 시작하세요.</p>
+        </section>
 
-        <div class="mobile-controls" aria-label="Game controls">
-          <button class="control-button" id="leftButton" type="button" aria-label="Move left">←</button>
-          <button class="control-button boost" id="boostButton" type="button" aria-label="Bounce boost">BOOST</button>
-          <button class="control-button" id="rightButton" type="button" aria-label="Move right">→</button>
-        </div>
+        <section class="stats-row">
+          <div class="stat">
+            <span class="stat-label">Map</span>
+            <strong id="mapLabel">Waiting</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Timer</span>
+            <strong id="timerLabel">--:--</strong>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Queue</span>
+            <strong id="queueLabel">0명</strong>
+          </div>
+        </section>
+
+        <section class="canvas-wrap">
+          <canvas id="gameCanvas" width="1280" height="720" aria-label="Online bounce race"></canvas>
+          <div class="overlay" id="overlayText">QUEUE UP TO START</div>
+        </section>
+
+        <section class="leaderboards">
+          <article class="board">
+            <h2>Match Rank</h2>
+            <ol id="liveRank"></ol>
+          </article>
+          <article class="board">
+            <h2>Global Top</h2>
+            <ol id="globalRank"></ol>
+          </article>
+        </section>
+
+        <section class="mobile-controls" aria-label="Game controls">
+          <button class="control" id="leftButton" type="button" aria-label="Move left">←</button>
+          <button class="control boost" id="boostButton" type="button" aria-label="Bounce boost">BOOST</button>
+          <button class="control" id="rightButton" type="button" aria-label="Move right">→</button>
+        </section>
       </section>
     </main>
 
-    <script src="./game.js"></script>
+    <script type="module" src="./game.js"></script>
   </body>
 </html>

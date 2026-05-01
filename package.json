@@ -1,9 +1,10 @@
 {
-  "name": "bounce-blocks",
+  "name": "bounce-arena",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "python3 -m http.server 4173",
-    "start": "python3 -m http.server 4173"
+    "dev": "node server.js",
+    "start": "node server.js"
   }
 }

@@ -1,416 +1,278 @@
+import { PHYSICS, clamp } from "./maps.js";
+
+const POLL_MS = 170;
+const INPUT_MS = 70;
+const PLAYER_KEY = "bounce_online_player_id";
+const NICK_KEY = "bounce_online_nickname";
+
 const canvas = document.querySelector("#gameCanvas");
 const ctx = canvas.getContext("2d");
-const toast = document.querySelector("#toast");
-const resetButton = document.querySelector("#resetButton");
-const stageButtons = [...document.querySelectorAll(".stage-tab")];
+const queueButton = document.querySelector("#queueButton");
+const nicknameInput = document.querySelector("#nicknameInput");
+const queueStatus = document.querySelector("#queueStatus");
+const mapLabel = document.querySelector("#mapLabel");
+const timerLabel = document.querySelector("#timerLabel");
+const queueLabel = document.querySelector("#queueLabel");
+const gradeChip = document.querySelector("#gradeChip");
+const ratingChip = document.querySelector("#ratingChip");
+const overlayText = document.querySelector("#overlayText");
+const liveRank = document.querySelector("#liveRank");
+const globalRank = document.querySelector("#globalRank");
 
-const TILE = 40;
-const WORLD = { cols: 24, rows: 16, width: 960, height: 640 };
-const GRAVITY = 1750;
-const FRICTION = 0.985;
-const MOVE_ACCEL = 1120;
-const AIR_ACCEL = 720;
-const MAX_VX = 520;
-const BOUNCE = 0.72;
-const BOOST = 620;
+const input = { left: false, right: false, boost: false };
 
-const input = {
-  left: false,
-  right: false,
-  boost: false,
+const state = {
+  playerId: getOrCreatePlayerId(),
+  match: null,
+  profile: null,
+  queue: { inQueue: false, playersWaiting: 0, position: null },
+  globalTop: [],
+  cameraX: 0,
+  connected: false,
+  polling: false,
+  sendingInput: false,
+  justFinishedMatchId: null,
 };
 
-const stages = [
-  {
-    name: "Warm Up",
-    start: { x: 72, y: 470 },
-    goal: { x: 838, y: 454, w: 72, h: 86 },
-    map: [
-      "########################",
-      "#......................#",
-      "#......................#",
-      "#......................#",
-      "#......................#",
-      "#......................#",
-      "#......................#",
-      "#......................#",
-      "#...................##.#",
-      "#...........#####...##.#",
-      "#.......####........##.#",
-      "#....###...............#",
-      "#..##..................#",
-      "#......................#",
-      "########################",
-      "########################",
-    ],
-  },
-  {
-    name: "Pocket Run",
-    start: { x: 72, y: 430 },
-    goal: { x: 832, y: 166, w: 72, h: 82 },
-    map: [
-      "########################",
-      "#......................#",
-      "#......................#",
-      "#....................###",
-      "#.................##...#",
-      "#..............##......#",
-      "#..........##..........#",
-      "#.......##.............#",
-      "#......................#",
-      "#..####.......###......#",
-      "#......##........##....#",
-      "#........##............#",
-      "#..........###.....##..#",
-      "#......................#",
-      "#####...########...#####",
-      "########################",
-    ],
-  },
-  {
-    name: "High Wall",
-    start: { x: 72, y: 470 },
-    goal: { x: 842, y: 72, w: 70, h: 78 },
-    map: [
-      "########################",
-      "#......................#",
-      "#...................#..#",
-      "#.................###..#",
-      "#..............##......#",
-      "#...........##.........#",
-      "#........##............#",
-      "#.....##...............#",
-      "#......................#",
-      "#..###.................#",
-      "#.........####.........#",
-      "#..................###.#",
-      "#.....###..............#",
-      "#......................#",
-      "############..##########",
-      "########################",
-    ],
-  },
-];
+function getOrCreatePlayerId() {
+  const known = localStorage.getItem(PLAYER_KEY);
+  if (known) return known;
+  const id = `p_${Math.random().toString(36).slice(2, 11)}${Date.now().toString(36).slice(-4)}`;
+  localStorage.setItem(PLAYER_KEY, id);
+  return id;
+}
 
-let activeStage = 0;
-let solids = [];
-let lastTime = 0;
-let toastTimer = 0;
-let cameraShake = 0;
+function getDefaultNick() {
+  const saved = localStorage.getItem(NICK_KEY);
+  if (saved) return saved;
+  return `Player-${state.playerId.slice(-4)}`;
+}
 
-const ball = {
-  x: 0,
-  y: 0,
-  r: 15,
-  vx: 0,
-  vy: 0,
-  grounded: false,
-  trail: [],
-};
+function updateNickStorage(name) {
+  localStorage.setItem(NICK_KEY, name);
+}
 
-function tileRects(map) {
-  const rects = [];
-  for (let y = 0; y < map.length; y += 1) {
-    let runStart = -1;
-    for (let x = 0; x <= map[y].length; x += 1) {
-      const filled = map[y][x] === "#";
-      if (filled && runStart === -1) runStart = x;
-      if ((!filled || x === map[y].length) && runStart !== -1) {
-        rects.push({
-          x: runStart * TILE,
-          y: y * TILE,
-          w: (x - runStart) * TILE,
-          h: TILE,
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers: { "Content-Type": "application/json" },
+    body: options.body ? JSON.stringify(options.body) : null,
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || "Request failed");
+  }
+  return payload;
+}
+
+async function registerPlayer() {
+  const nickname = sanitizeNick(nicknameInput.value || getDefaultNick());
+  nicknameInput.value = nickname;
+  updateNickStorage(nickname);
+  const payload = await api("/api/register", {
+    method: "POST",
+    body: { playerId: state.playerId, nickname },
+  });
+  state.profile = payload.profile;
+}
+
+function sanitizeNick(name) {
+  const cleaned = (name || "")
+    .replace(/[\u0000-\u001f]/g, "")
+    .trim()
+    .slice(0, 16);
+  return cleaned || `Player-${state.playerId.slice(-4)}`;
+}
+
+function formatMs(ms) {
+  if (typeof ms !== "number" || ms <= 0) return "00:00";
+  const sec = Math.floor(ms / 1000);
+  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function setOverlay(message) {
+  overlayText.textContent = message;
+}
+
+function renderLists() {
+  const rankRows = state.match?.status === "finished" ? state.match.results : state.match?.liveRanking;
+  renderOrderedList(
+    liveRank,
+    rankRows,
+    (row) =>
+      `${row.rank}위 ${row.nickname} · ${
+        row.finishMs != null ? `${(row.finishMs / 1000).toFixed(1)}s` : `${Math.round(row.progress * 100)}%`
+      }${row.points ? ` · +${row.points}p` : ""}`,
+  );
+  renderOrderedList(globalRank, state.globalTop, (row) => `${row.nickname} · ${row.rating} RP (${row.grade})`);
+}
+
+function renderOrderedList(target, rows, formatter) {
+  target.textContent = "";
+  if (!rows || rows.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "-";
+    target.append(li);
+    return;
+  }
+  rows.slice(0, 8).forEach((row) => {
+    const li = document.createElement("li");
+    li.textContent = formatter(row);
+    target.append(li);
+  });
+}
+
+function updatePanels() {
+  if (state.profile) {
+    gradeChip.textContent = state.profile.grade;
+    ratingChip.textContent = `${state.profile.rating} RP`;
+  }
+
+  if (state.match?.status === "running") {
+    mapLabel.textContent = state.match.map.name;
+    timerLabel.textContent = formatMs(state.match.remainingMs);
+    queueStatus.textContent = "매치 진행중입니다. 1위로 골인하면 최대 승점을 획득합니다.";
+    queueButton.disabled = true;
+    queueButton.classList.remove("is-queued");
+    queueButton.textContent = "진행중";
+    setOverlay(`${state.match.map.name} · ${formatMs(state.match.remainingMs)}`);
+  } else if (state.match?.status === "finished") {
+    mapLabel.textContent = state.match.map.name;
+    timerLabel.textContent = "FIN";
+    queueStatus.textContent = "결과 확인 후 다시 매칭을 눌러 다음 라운드에 참가하세요.";
+    queueButton.disabled = false;
+    queueButton.classList.remove("is-queued");
+    queueButton.textContent = "다음 매칭";
+    setOverlay("MATCH END");
+  } else if (state.queue.inQueue) {
+    mapLabel.textContent = "Waiting";
+    timerLabel.textContent = "--:--";
+    const pos = state.queue.position ? `${state.queue.position}번째` : "대기중";
+    queueStatus.textContent = `${pos} · 최소 2명부터 매칭됩니다.`;
+    queueButton.disabled = false;
+    queueButton.classList.add("is-queued");
+    queueButton.textContent = "매칭 취소";
+    setOverlay("MATCHMAKING");
+  } else {
+    mapLabel.textContent = "Waiting";
+    timerLabel.textContent = "--:--";
+    queueStatus.textContent = "매칭 버튼을 눌러 레이스를 시작하세요.";
+    queueButton.disabled = false;
+    queueButton.classList.remove("is-queued");
+    queueButton.textContent = "매칭 시작";
+    setOverlay("QUEUE UP TO START");
+  }
+
+  queueLabel.textContent = `${state.queue.playersWaiting}명`;
+}
+
+function updateFromServer(payload) {
+  state.connected = true;
+  state.profile = payload.profile;
+  state.queue = payload.queue;
+  state.match = payload.match;
+  state.globalTop = payload.globalTop;
+
+  if (!state.match && state.justFinishedMatchId) {
+    state.justFinishedMatchId = null;
+  }
+
+  if (state.match?.status === "finished") {
+    state.justFinishedMatchId = state.match.id;
+  }
+
+  renderLists();
+  updatePanels();
+}
+
+async function pollLoop() {
+  if (state.polling) return;
+  state.polling = true;
+  while (true) {
+    try {
+      const payload = await api(`/api/state?playerId=${encodeURIComponent(state.playerId)}`);
+      updateFromServer(payload);
+    } catch {
+      state.connected = false;
+      queueStatus.textContent = "서버 연결이 잠시 끊겼습니다. 자동으로 재시도합니다.";
+    }
+    await sleep(POLL_MS);
+  }
+}
+
+async function inputLoop() {
+  if (state.sendingInput) return;
+  state.sendingInput = true;
+  while (true) {
+    if (state.match?.status === "running") {
+      try {
+        await api("/api/input", {
+          method: "POST",
+          body: { playerId: state.playerId, ...input },
         });
-        runStart = -1;
+      } catch {
+        // Input loop keeps running even on transient failure.
       }
     }
-  }
-  return rects;
-}
-
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add("show");
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toast.classList.remove("show"), 1400);
-}
-
-function setStage(index, announce = true) {
-  activeStage = (index + stages.length) % stages.length;
-  solids = tileRects(stages[activeStage].map);
-  const { start } = stages[activeStage];
-  ball.x = start.x;
-  ball.y = start.y;
-  ball.vx = 0;
-  ball.vy = 0;
-  ball.grounded = false;
-  ball.trail = [];
-  stageButtons.forEach((button, idx) => {
-    button.classList.toggle("is-active", idx === activeStage);
-    button.setAttribute("aria-pressed", String(idx === activeStage));
-  });
-  if (announce) showToast(`Stage ${activeStage + 1}: ${stages[activeStage].name}`);
-}
-
-function resize() {
-  const ratio = window.devicePixelRatio || 1;
-  const box = canvas.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.floor(box.width * ratio));
-  canvas.height = Math.max(1, Math.floor(box.height * ratio));
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function circleRectCollision(circle, rect) {
-  const nearestX = clamp(circle.x, rect.x, rect.x + rect.w);
-  const nearestY = clamp(circle.y, rect.y, rect.y + rect.h);
-  const dx = circle.x - nearestX;
-  const dy = circle.y - nearestY;
-  const distSq = dx * dx + dy * dy;
-  if (distSq >= circle.r * circle.r) return null;
-
-  if (distSq === 0) {
-    const left = Math.abs(circle.x - rect.x);
-    const right = Math.abs(rect.x + rect.w - circle.x);
-    const top = Math.abs(circle.y - rect.y);
-    const bottom = Math.abs(rect.y + rect.h - circle.y);
-    const min = Math.min(left, right, top, bottom);
-    if (min === top) return { nx: 0, ny: -1, depth: circle.r + top };
-    if (min === bottom) return { nx: 0, ny: 1, depth: circle.r + bottom };
-    if (min === left) return { nx: -1, ny: 0, depth: circle.r + left };
-    return { nx: 1, ny: 0, depth: circle.r + right };
-  }
-
-  const dist = Math.sqrt(distSq);
-  return {
-    nx: dx / dist,
-    ny: dy / dist,
-    depth: circle.r - dist,
-  };
-}
-
-function resolveCollisions() {
-  ball.grounded = false;
-  for (const rect of solids) {
-    const hit = circleRectCollision(ball, rect);
-    if (!hit) continue;
-
-    ball.x += hit.nx * hit.depth;
-    ball.y += hit.ny * hit.depth;
-
-    const velocityAlongNormal = ball.vx * hit.nx + ball.vy * hit.ny;
-    if (velocityAlongNormal < 0) {
-      ball.vx -= (1 + BOUNCE) * velocityAlongNormal * hit.nx;
-      ball.vy -= (1 + BOUNCE) * velocityAlongNormal * hit.ny;
-    }
-
-    if (hit.ny < -0.62) {
-      ball.grounded = true;
-      if (Math.abs(ball.vy) < 260) ball.vy = -360;
-      cameraShake = Math.min(7, cameraShake + 1.5);
-    }
+    await sleep(INPUT_MS);
   }
 }
 
-function update(dt) {
-  const accel = ball.grounded ? MOVE_ACCEL : AIR_ACCEL;
-  if (input.left) ball.vx -= accel * dt;
-  if (input.right) ball.vx += accel * dt;
-  ball.vx = clamp(ball.vx * FRICTION, -MAX_VX, MAX_VX);
-
-  if (input.boost && ball.grounded) {
-    ball.vy = -BOOST;
-    ball.grounded = false;
-    cameraShake = 6;
-  }
-
-  ball.vy += GRAVITY * dt;
-  ball.x += ball.vx * dt;
-  ball.y += ball.vy * dt;
-
-  resolveCollisions();
-
-  if (ball.y > WORLD.height + 140) {
-    showToast("다시 튕겨볼까요?");
-    setStage(activeStage, false);
-  }
-
-  const goal = stages[activeStage].goal;
-  const inGoal =
-    ball.x + ball.r > goal.x &&
-    ball.x - ball.r < goal.x + goal.w &&
-    ball.y + ball.r > goal.y &&
-    ball.y - ball.r < goal.y + goal.h;
-
-  if (inGoal) {
-    if (activeStage === stages.length - 1) {
-      showToast("All clear. Nice bounce!");
-      setStage(0, false);
-    } else {
-      setStage(activeStage + 1);
-    }
-  }
-
-  ball.trail.push({ x: ball.x, y: ball.y });
-  if (ball.trail.length > 18) ball.trail.shift();
-  cameraShake *= Math.pow(0.02, dt);
-}
-
-function drawTile(x, y, w, h) {
-  const cols = Math.floor(w / TILE);
-  for (let i = 0; i < cols; i += 1) {
-    const tx = x + i * TILE;
-    ctx.fillStyle = "#c77d57";
-    ctx.fillRect(tx + 2, y + 2, TILE - 4, h - 4);
-    ctx.fillStyle = "#f1b07d";
-    ctx.fillRect(tx + 5, y + 5, TILE - 10, 4);
-    ctx.fillRect(tx + 5, y + 5, 4, TILE - 10);
-    ctx.fillStyle = "#6e3d31";
-    ctx.fillRect(tx + 7, y + 13, TILE - 14, TILE - 20);
-    ctx.strokeStyle = "#2b1714";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(tx + 8, y + 14, TILE - 16, TILE - 22);
-    ctx.fillStyle = "rgba(255, 238, 204, 0.22)";
-    ctx.fillRect(tx + 14, y + 18, 9, 3);
-    ctx.fillRect(tx + 26, y + 24, 5, 8);
-  }
-}
-
-function drawBackdrop() {
-  ctx.fillStyle = "#020203";
-  ctx.fillRect(0, 0, WORLD.width, WORLD.height);
-
-  ctx.strokeStyle = "rgba(75, 67, 72, 0.34)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(40, 548);
-  ctx.lineTo(108, 612);
-  ctx.lineTo(176, 494);
-  ctx.quadraticCurveTo(220, 432, 272, 452);
-  ctx.quadraticCurveTo(334, 328, 418, 372);
-  ctx.quadraticCurveTo(500, 246, 594, 318);
-  ctx.quadraticCurveTo(638, 220, 710, 282);
-  ctx.lineTo(758, 238);
-  ctx.lineTo(802, 318);
-  ctx.quadraticCurveTo(850, 408, 862, 562);
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(102, 217, 199, 0.11)";
-  ctx.lineWidth = 2;
-  for (let x = 0; x <= WORLD.width; x += 120) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, WORLD.height);
-    ctx.stroke();
-  }
-}
-
-function drawGoal(goal) {
-  const pulse = 0.5 + Math.sin(performance.now() * 0.006) * 0.5;
-  ctx.fillStyle = "rgba(102, 217, 199, 0.14)";
-  ctx.fillRect(goal.x - 8, goal.y - 8, goal.w + 16, goal.h + 16);
-  ctx.strokeStyle = `rgba(102, 217, 199, ${0.55 + pulse * 0.35})`;
-  ctx.lineWidth = 4;
-  ctx.strokeRect(goal.x, goal.y, goal.w, goal.h);
-  ctx.fillStyle = "#f3eadf";
-  ctx.font = "700 18px ui-sans-serif, system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText("GOAL", goal.x + goal.w / 2, goal.y + goal.h / 2 + 6);
-}
-
-function drawBall() {
-  for (let i = 0; i < ball.trail.length; i += 1) {
-    const p = ball.trail[i];
-    const alpha = i / ball.trail.length;
-    ctx.fillStyle = `rgba(246, 195, 95, ${alpha * 0.18})`;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, ball.r * alpha, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const gradient = ctx.createRadialGradient(
-    ball.x - 6,
-    ball.y - 7,
-    3,
-    ball.x,
-    ball.y,
-    ball.r + 4,
-  );
-  gradient.addColorStop(0, "#fff4cf");
-  gradient.addColorStop(0.34, "#f6c35f");
-  gradient.addColorStop(1, "#b74638");
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#321712";
-  ctx.lineWidth = 3;
-  ctx.stroke();
-}
-
-function draw() {
-  const sx = canvas.width / WORLD.width;
-  const sy = canvas.height / WORLD.height;
-  const scale = Math.min(sx, sy);
-  const offsetX = (canvas.width - WORLD.width * scale) / 2;
-  const offsetY = (canvas.height - WORLD.height * scale) / 2;
-  const shakeX = (Math.random() - 0.5) * cameraShake;
-  const shakeY = (Math.random() - 0.5) * cameraShake;
-
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
-  ctx.save();
-  ctx.translate(shakeX, shakeY);
-
-  drawBackdrop();
-  drawGoal(stages[activeStage].goal);
-  solids.forEach((rect) => drawTile(rect.x, rect.y, rect.w, rect.h));
-  drawBall();
-
-  ctx.fillStyle = "rgba(243, 234, 223, 0.86)";
-  ctx.font = "700 18px ui-sans-serif, system-ui";
-  ctx.textAlign = "left";
-  ctx.fillText(`STAGE ${activeStage + 1}`, 22, 72);
-  ctx.fillStyle = "rgba(185, 170, 159, 0.8)";
-  ctx.font = "500 14px ui-sans-serif, system-ui";
-  ctx.fillText(stages[activeStage].name, 22, 94);
-
-  ctx.restore();
-}
-
-function loop(now) {
-  const dt = Math.min(0.024, (now - lastTime) / 1000 || 0);
-  lastTime = now;
-  update(dt);
-  draw();
-  requestAnimationFrame(loop);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function bindHold(button, key) {
-  const set = (value) => {
+  const setValue = (value) => {
     input[key] = value;
     button.classList.toggle("is-pressed", value);
   };
-
   button.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     button.setPointerCapture(event.pointerId);
-    set(true);
+    setValue(true);
   });
-  button.addEventListener("pointerup", () => set(false));
-  button.addEventListener("pointercancel", () => set(false));
-  button.addEventListener("lostpointercapture", () => set(false));
+  button.addEventListener("pointerup", () => setValue(false));
+  button.addEventListener("pointercancel", () => setValue(false));
+  button.addEventListener("lostpointercapture", () => setValue(false));
+}
+
+async function toggleQueue() {
+  if (state.match?.status === "running") return;
+  const nickname = sanitizeNick(nicknameInput.value);
+  nicknameInput.value = nickname;
+  updateNickStorage(nickname);
+  await registerPlayer();
+  if (state.queue.inQueue) {
+    await api("/api/queue/leave", { method: "POST", body: { playerId: state.playerId } });
+  } else {
+    await api("/api/queue/join", {
+      method: "POST",
+      body: { playerId: state.playerId, nickname },
+    });
+  }
 }
 
 function bindControls() {
   bindHold(document.querySelector("#leftButton"), "left");
   bindHold(document.querySelector("#rightButton"), "right");
   bindHold(document.querySelector("#boostButton"), "boost");
+
+  queueButton.addEventListener("click", async () => {
+    try {
+      await toggleQueue();
+    } catch (error) {
+      queueStatus.textContent = error.message || "매칭 처리 중 오류가 발생했습니다.";
+    }
+  });
+
+  nicknameInput.addEventListener("change", () => {
+    const nickname = sanitizeNick(nicknameInput.value);
+    nicknameInput.value = nickname;
+    updateNickStorage(nickname);
+  });
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") input.left = true;
@@ -419,28 +281,193 @@ function bindControls() {
       input.boost = true;
       event.preventDefault();
     }
-    if (event.key.toLowerCase() === "r") setStage(activeStage);
   });
-
   window.addEventListener("keyup", (event) => {
     if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") input.left = false;
     if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") input.right = false;
     if (event.key === " " || event.key === "ArrowUp" || event.key.toLowerCase() === "w") {
       input.boost = false;
+      event.preventDefault();
     }
-  });
-
-  resetButton.addEventListener("click", () => setStage(activeStage));
-  stageButtons.forEach((button) => {
-    button.addEventListener("click", () => setStage(Number(button.dataset.stage)));
   });
 }
 
-window.addEventListener("resize", resize);
-window.addEventListener("orientationchange", resize);
+function resizeCanvas() {
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+  canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
 
-bindControls();
-resize();
-setStage(0, false);
-showToast("좌우 이동 + BOOST로 골인!");
-requestAnimationFrame(loop);
+function drawBackground(map, camX) {
+  ctx.fillStyle = "#f8e8d2";
+  ctx.fillRect(camX, 0, canvas.width, map.height);
+
+  const lineStep = 160;
+  ctx.strokeStyle = "rgba(26, 135, 126, 0.2)";
+  ctx.lineWidth = 2;
+  for (let x = Math.floor(camX / lineStep) * lineStep; x < camX + map.width; x += lineStep) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, map.height);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(197, 124, 64, 0.22)";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(camX, 560);
+  for (let x = camX; x < camX + 1800; x += 200) {
+    const y = 500 + Math.sin(x * 0.008) * 90;
+    ctx.quadraticCurveTo(x + 100, y, x + 200, 540 + Math.cos(x * 0.006) * 40);
+  }
+  ctx.stroke();
+}
+
+function drawSolid(rect) {
+  const tile = PHYSICS.tile;
+  const cols = Math.max(1, Math.floor(rect.w / tile));
+  for (let i = 0; i < cols; i += 1) {
+    const tx = rect.x + i * tile;
+    ctx.fillStyle = "#d18759";
+    ctx.fillRect(tx + 1, rect.y + 1, tile - 2, rect.h - 2);
+    ctx.fillStyle = "#efc295";
+    ctx.fillRect(tx + 4, rect.y + 4, tile - 8, 5);
+    ctx.fillStyle = "#8f4f34";
+    ctx.fillRect(tx + 8, rect.y + 13, tile - 16, tile - 18);
+    ctx.strokeStyle = "#3d2318";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tx + 8, rect.y + 13, tile - 16, tile - 18);
+  }
+}
+
+function drawFinish(map) {
+  const pulse = 0.5 + Math.sin(performance.now() * 0.007) * 0.5;
+  const x = map.finishX;
+  ctx.fillStyle = `rgba(31, 138, 131, ${0.2 + pulse * 0.2})`;
+  ctx.fillRect(x - 22, 120, 44, map.height - 160);
+  ctx.strokeStyle = `rgba(31, 138, 131, ${0.5 + pulse * 0.45})`;
+  ctx.lineWidth = 5;
+  ctx.strokeRect(x - 12, 110, 24, map.height - 150);
+  ctx.fillStyle = "#165e58";
+  ctx.font = '700 24px "Trebuchet MS", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText("FINISH", x, 84);
+}
+
+function drawCheckpoints(map) {
+  ctx.strokeStyle = "rgba(232, 142, 64, 0.42)";
+  ctx.lineWidth = 3;
+  for (const cp of map.checkpoints) {
+    ctx.beginPath();
+    ctx.moveTo(cp.x, map.height - 110);
+    ctx.lineTo(cp.x, map.height - 70);
+    ctx.stroke();
+  }
+}
+
+function drawPlayer(player, isMe) {
+  const radius = PHYSICS.playerRadius;
+  const gradient = ctx.createRadialGradient(player.x - 4, player.y - 5, 3, player.x, player.y, radius + 4);
+  gradient.addColorStop(0, "#fff4d7");
+  gradient.addColorStop(0.4, player.color);
+  gradient.addColorStop(1, "#9b3d2f");
+
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = isMe ? "#1f8a83" : "#573327";
+  ctx.lineWidth = isMe ? 4 : 2;
+  ctx.stroke();
+
+  ctx.fillStyle = "#2f2a28";
+  ctx.font = '600 13px "Trebuchet MS", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText(player.nickname, player.x, player.y - 20);
+}
+
+function drawMatch(match) {
+  const map = match.map;
+  const me = match.players.find((player) => player.playerId === state.playerId);
+  const sx = canvas.width / map.width;
+  const sy = canvas.height / map.height;
+  const scale = Math.min(1.2, Math.max(sx, sy));
+  const visibleWidth = canvas.width / scale;
+  const visibleHeight = canvas.height / scale;
+
+  const targetCam = clamp((me?.x ?? 0) - visibleWidth * 0.32, 0, map.width - visibleWidth);
+  state.cameraX += (targetCam - state.cameraX) * 0.2;
+
+  const offsetX = (canvas.width - visibleWidth * scale) / 2;
+  const offsetY = (canvas.height - visibleHeight * scale) / 2;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+  ctx.translate(-state.cameraX, 0);
+
+  drawBackground(map, state.cameraX);
+  drawCheckpoints(map);
+  drawFinish(map);
+
+  const viewLeft = state.cameraX - PHYSICS.tile;
+  const viewRight = state.cameraX + visibleWidth + PHYSICS.tile;
+  for (const rect of map.solids) {
+    if (rect.x + rect.w < viewLeft || rect.x > viewRight) continue;
+    drawSolid(rect);
+  }
+
+  for (const player of match.players) {
+    drawPlayer(player, player.playerId === state.playerId);
+  }
+}
+
+function drawLobby() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, "#fff1de");
+  grad.addColorStop(1, "#f7e8d2");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "#9b5a38";
+  ctx.font = '700 34px "Trebuchet MS", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText("Bounce Arena", canvas.width / 2, canvas.height / 2 - 10);
+  ctx.fillStyle = "#5f5853";
+  ctx.font = '500 18px "Trebuchet MS", sans-serif';
+  ctx.fillText("Queue up and race with up to 5 players", canvas.width / 2, canvas.height / 2 + 24);
+}
+
+function frame() {
+  if (state.match) drawMatch(state.match);
+  else drawLobby();
+  requestAnimationFrame(frame);
+}
+
+async function init() {
+  nicknameInput.value = sanitizeNick(getDefaultNick());
+  bindControls();
+  resizeCanvas();
+  window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("orientationchange", resizeCanvas);
+
+  try {
+    await registerPlayer();
+  } catch {
+    queueStatus.textContent = "초기 연결에 실패했습니다. 잠시 후 자동 재시도됩니다.";
+  }
+
+  updatePanels();
+  renderLists();
+  requestAnimationFrame(frame);
+  pollLoop();
+  inputLoop();
+}
+
+init();
+
