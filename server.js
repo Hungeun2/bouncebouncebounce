@@ -2,6 +2,7 @@ import http from "node:http";
 import path from "node:path";
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { WebSocketServer } from "ws";
 import { MAPS, PHYSICS, clamp } from "./maps.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -49,6 +50,7 @@ const queue = [];
 const matches = new Map();
 const playerToMatch = new Map();
 const ratingBook = new Map();
+const socketsByPlayer = new Map();
 
 let nextMatchId = 1;
 let saveTimer = null;
@@ -171,6 +173,12 @@ async function saveRatings() {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
+}
+
+function sendSocketState(playerId) {
+  const socket = socketsByPlayer.get(playerId);
+  if (!socket || socket.readyState !== 1) return;
+  socket.send(JSON.stringify({ type: "state", state: buildState(playerId) }));
 }
 
 async function readBody(req) {
@@ -424,12 +432,17 @@ function tickMatches() {
     const doneCount = [...match.players.values()].filter((player) => player.finishedAt).length;
     if (doneCount === match.players.size) {
       finalizeMatch(match, "all-finished");
+      broadcastMatch(match);
       continue;
     }
 
     if (elapsedMs >= match.map.timeLimitSec * 1000) {
       finalizeMatch(match, "timeout");
+      broadcastMatch(match);
+      continue;
     }
+
+    broadcastMatch(match);
   }
 }
 
@@ -547,6 +560,12 @@ function buildState(playerId) {
   };
 }
 
+function broadcastMatch(match) {
+  for (const playerId of match.players.keys()) {
+    sendSocketState(playerId);
+  }
+}
+
 async function serveFile(reqPath, res) {
   const clean = reqPath === "/" ? "/index.html" : reqPath;
   const target = path.normalize(path.join(__dirname, clean));
@@ -612,6 +631,7 @@ async function handleApi(req, res, urlObj) {
       const profile = ensureProfile(player.playerId, body.nickname);
       player.nickname = profile.nickname;
       sendJson(res, 200, { ok: true, profile: publicProfile(profile) });
+      sendSocketState(player.playerId);
     } catch {
       sendJson(res, 400, { ok: false, error: "Invalid request" });
     }
@@ -652,6 +672,7 @@ async function handleApi(req, res, urlObj) {
         queue.push({ playerId: player.playerId, joinedAt: now() });
       }
       sendJson(res, 200, { ok: true, queued: true });
+      sendSocketState(player.playerId);
     } catch {
       sendJson(res, 400, { ok: false, error: "Invalid request" });
     }
@@ -668,6 +689,7 @@ async function handleApi(req, res, urlObj) {
       }
       removeFromQueue(player.playerId);
       sendJson(res, 200, { ok: true, queued: false });
+      sendSocketState(player.playerId);
     } catch {
       sendJson(res, 400, { ok: false, error: "Invalid request" });
     }
@@ -710,6 +732,46 @@ async function handleApi(req, res, urlObj) {
   sendJson(res, 404, { ok: false, error: "Unknown API route" });
 }
 
+function handleSocketConnection(ws, req) {
+  const urlObj = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  const playerId = urlObj.searchParams.get("playerId") || "";
+  if (!playerId || playerId.length < 6) {
+    ws.close();
+    return;
+  }
+
+  const player = ensurePlayer(playerId);
+  if (!player) {
+    ws.close();
+    return;
+  }
+
+  socketsByPlayer.set(playerId, ws);
+  ws.send(JSON.stringify({ type: "state", state: buildState(playerId) }));
+
+  ws.on("message", (raw) => {
+    try {
+      const message = JSON.parse(raw.toString("utf-8"));
+      if (message.type !== "input") return;
+      const matchId = playerToMatch.get(playerId);
+      if (!matchId) return;
+      const match = matches.get(matchId);
+      if (!match || match.status !== "running") return;
+      const racer = match.players.get(playerId);
+      if (!racer) return;
+      racer.input.left = Boolean(message.left);
+      racer.input.right = Boolean(message.right);
+      racer.input.boost = Boolean(message.boost);
+    } catch {
+      // ignore malformed packet
+    }
+  });
+
+  ws.on("close", () => {
+    if (socketsByPlayer.get(playerId) === ws) socketsByPlayer.delete(playerId);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   setSecurityHeaders(res);
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -728,6 +790,21 @@ const server = http.createServer(async (req, res) => {
 
   await serveFile(requestUrl.pathname, res);
 });
+
+const wss = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (req, socket, head) => {
+  const urlObj = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  if (urlObj.pathname !== "/ws") {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit("connection", ws, req);
+  });
+});
+
+wss.on("connection", handleSocketConnection);
 
 await loadRatings();
 const tickTimer = setInterval(tickMatches, TICK_MS);

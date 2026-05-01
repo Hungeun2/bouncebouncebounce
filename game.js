@@ -1,7 +1,5 @@
 import { PHYSICS, clamp } from "./maps.js";
 
-const POLL_MS = 170;
-const INPUT_MS = 70;
 const PLAYER_KEY = "bounce_online_player_id";
 const NICK_KEY = "bounce_online_nickname";
 
@@ -29,8 +27,8 @@ const state = {
   globalTop: [],
   cameraX: 0,
   connected: false,
-  polling: false,
-  sendingInput: false,
+  socket: null,
+  reconnectTimer: null,
   justFinishedMatchId: null,
 };
 
@@ -63,6 +61,50 @@ async function api(path, options = {}) {
     throw new Error(payload.error || "Request failed");
   }
   return payload;
+}
+
+function wsUrl() {
+  const url = new URL(window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/ws";
+  url.search = `?playerId=${encodeURIComponent(state.playerId)}`;
+  return url.toString();
+}
+
+function connectSocket() {
+  if (state.socket && (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  const socket = new WebSocket(wsUrl());
+  state.socket = socket;
+
+  socket.addEventListener("open", () => {
+    state.connected = true;
+    queueStatus.textContent = "실시간 연결됨";
+  });
+
+  socket.addEventListener("message", (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.type === "state") updateFromServer(payload.state);
+    } catch {
+      // ignore malformed payloads
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    state.connected = false;
+    if (state.reconnectTimer) return;
+    state.reconnectTimer = window.setTimeout(() => {
+      state.reconnectTimer = null;
+      connectSocket();
+    }, 800);
+  });
+
+  socket.addEventListener("error", () => {
+    state.connected = false;
+  });
 }
 
 async function registerPlayer() {
@@ -187,43 +229,6 @@ function updateFromServer(payload) {
   updatePanels();
 }
 
-async function pollLoop() {
-  if (state.polling) return;
-  state.polling = true;
-  while (true) {
-    try {
-      const payload = await api(`/api/state?playerId=${encodeURIComponent(state.playerId)}`);
-      updateFromServer(payload);
-    } catch {
-      state.connected = false;
-      queueStatus.textContent = "서버 연결이 잠시 끊겼습니다. 자동으로 재시도합니다.";
-    }
-    await sleep(POLL_MS);
-  }
-}
-
-async function inputLoop() {
-  if (state.sendingInput) return;
-  state.sendingInput = true;
-  while (true) {
-    if (state.match?.status === "running") {
-      try {
-        await api("/api/input", {
-          method: "POST",
-          body: { playerId: state.playerId, ...input },
-        });
-      } catch {
-        // Input loop keeps running even on transient failure.
-      }
-    }
-    await sleep(INPUT_MS);
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function bindHold(button, key) {
   const setValue = (value) => {
     input[key] = value;
@@ -233,10 +238,20 @@ function bindHold(button, key) {
     event.preventDefault();
     button.setPointerCapture(event.pointerId);
     setValue(true);
+    sendInput();
   });
-  button.addEventListener("pointerup", () => setValue(false));
-  button.addEventListener("pointercancel", () => setValue(false));
-  button.addEventListener("lostpointercapture", () => setValue(false));
+  button.addEventListener("pointerup", () => {
+    setValue(false);
+    sendInput();
+  });
+  button.addEventListener("pointercancel", () => {
+    setValue(false);
+    sendInput();
+  });
+  button.addEventListener("lostpointercapture", () => {
+    setValue(false);
+    sendInput();
+  });
 }
 
 async function toggleQueue() {
@@ -253,6 +268,18 @@ async function toggleQueue() {
       body: { playerId: state.playerId, nickname },
     });
   }
+}
+
+function sendInput() {
+  if (state.match?.status !== "running") return;
+  if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    state.socket.send(JSON.stringify({ type: "input", ...input }));
+    return;
+  }
+  api("/api/input", {
+    method: "POST",
+    body: { playerId: state.playerId, ...input },
+  }).catch(() => {});
 }
 
 function bindControls() {
@@ -281,6 +308,7 @@ function bindControls() {
       input.boost = true;
       event.preventDefault();
     }
+    sendInput();
   });
   window.addEventListener("keyup", (event) => {
     if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") input.left = false;
@@ -289,6 +317,7 @@ function bindControls() {
       input.boost = false;
       event.preventDefault();
     }
+    sendInput();
   });
 }
 
@@ -465,9 +494,10 @@ async function init() {
   updatePanels();
   renderLists();
   requestAnimationFrame(frame);
-  pollLoop();
-  inputLoop();
+  connectSocket();
+  window.setInterval(() => {
+    if (state.socket?.readyState !== WebSocket.OPEN) connectSocket();
+  }, 3000);
 }
 
 init();
-
