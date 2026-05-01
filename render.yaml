@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: bounce-arena
+    env: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: DATA_DIR
+        value: /tmp/bounce-arena
+      - key: MAX_PLAYERS_PER_MATCH
+        value: 5
+      - key: MIN_PLAYERS_TO_START
+        value: 2
+      - key: QUEUE_WAIT_MS
+        value: 12000
+      - key: TICK_RATE
+        value: 30

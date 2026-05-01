@@ -131,6 +131,21 @@ TLS 적용:
 sudo certbot --nginx -d your-domain.com
 ```
 
+## Free Deploy (Render)
+
+무료 플랜으로 친구와 테스트하려면 이 경로가 가장 간단합니다.
+
+1. 이 저장소를 GitHub에 푸시
+2. Render에서 `New +` -> `Blueprint` 선택
+3. `render.yaml`을 읽어서 `bounce-arena` 서비스를 생성
+4. 첫 배포 후 Render가 준 URL을 친구에게 공유
+
+참고:
+
+- 무료 플랜에서는 인스턴스가 sleep 될 수 있습니다
+- 로컬 파일 저장은 영구적이지 않을 수 있어서, 무료 테스트용 승점은 재시작 시 초기화될 수 있습니다
+- 매치 서버는 단일 인스턴스로 동작하는 편이 안전합니다
+
 ## Runtime Notes
 
 - Start command: `npm start`
