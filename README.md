@@ -145,6 +145,8 @@ sudo certbot --nginx -d your-domain.com
 - 무료 플랜에서는 인스턴스가 sleep 될 수 있습니다
 - 로컬 파일 저장은 영구적이지 않을 수 있어서, 무료 테스트용 승점은 재시작 시 초기화될 수 있습니다
 - 매치 서버는 단일 인스턴스로 동작하는 편이 안전합니다
+- Render가 `npm ci` 대신 `npm install`을 쓰도록 맞춰두었습니다
+- Node 버전은 `.nvmrc` 기준 `22`로 고정했습니다
 
 ## Runtime Notes
 
