@@ -7,18 +7,31 @@ import { MAPS, PHYSICS, clamp } from "./maps.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 4173);
-const TICK_MS = Math.round(1000 / 30);
-const STATE_STALE_MS = 30_000;
-const MATCH_RESULTS_KEEP_MS = 45_000;
-const MAX_PLAYERS_PER_MATCH = 5;
-const MIN_PLAYERS_TO_START = 2;
-const QUEUE_WAIT_MS = 12_000;
-const FALL_RESPAWN_Y = 980;
-const FALL_PENALTY_MS = 3000;
+function envInt(name, fallback, min = 0) {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < min) return fallback;
+  return Math.floor(parsed);
+}
+
+const HOST = process.env.HOST || "0.0.0.0";
+const PORT = envInt("PORT", 4173, 1);
+const TICK_RATE = envInt("TICK_RATE", 30, 5);
+const TICK_MS = Math.round(1000 / TICK_RATE);
+const STATE_STALE_MS = envInt("STATE_STALE_MS", 30_000, 5_000);
+const MATCH_RESULTS_KEEP_MS = envInt("MATCH_RESULTS_KEEP_MS", 45_000, 5_000);
+const MAX_PLAYERS_PER_MATCH = envInt("MAX_PLAYERS_PER_MATCH", 5, 2);
+const MIN_PLAYERS_TO_START = envInt("MIN_PLAYERS_TO_START", 2, 2);
+const QUEUE_WAIT_MS = envInt("QUEUE_WAIT_MS", 12_000, 1_000);
+const FALL_RESPAWN_Y = envInt("FALL_RESPAWN_Y", 980, 300);
+const FALL_PENALTY_MS = envInt("FALL_PENALTY_MS", 3000, 0);
+const BODY_LIMIT_BYTES = envInt("BODY_LIMIT_BYTES", 64 * 1024, 1024);
+const STATIC_CACHE_SECONDS = envInt("STATIC_CACHE_SECONDS", 600, 0);
+const REQUIRED_PLAYERS_TO_START = Math.min(MIN_PLAYERS_TO_START, MAX_PLAYERS_PER_MATCH);
 const POINTS_BY_RANK = [34, 24, 17, 12, 8];
-const DATA_DIR = path.join(__dirname, "data");
-const RATINGS_PATH = path.join(DATA_DIR, "ratings.json");
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, "data");
+const RATINGS_PATH = path.join(DATA_DIR, process.env.RATINGS_FILE || "ratings.json");
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -39,6 +52,7 @@ const ratingBook = new Map();
 
 let nextMatchId = 1;
 let saveTimer = null;
+let shuttingDown = false;
 
 function now() {
   return Date.now();
@@ -119,9 +133,11 @@ function ensurePlayer(playerId, nicknameHint) {
 
 function scheduleSaveRatings() {
   if (saveTimer) return;
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(() => {
     saveTimer = null;
-    await saveRatings();
+    saveRatings().catch((error) => {
+      console.error("[ratings] save failed", error);
+    });
   }, 400);
 }
 
@@ -162,13 +178,24 @@ async function readBody(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 64 * 1024) {
+    if (size > BODY_LIMIT_BYTES) {
       throw new Error("BodyTooLarge");
     }
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+}
+
+function setSecurityHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  );
 }
 
 function queueIndexOf(playerId) {
@@ -416,7 +443,7 @@ function runMatchmaking() {
     }
   }
 
-  if (queue.length < MIN_PLAYERS_TO_START) return;
+  if (queue.length < REQUIRED_PLAYERS_TO_START) return;
 
   const shouldStart =
     queue.length >= MAX_PLAYERS_PER_MATCH || stamp - queue[0].joinedAt >= QUEUE_WAIT_MS;
@@ -523,7 +550,8 @@ function buildState(playerId) {
 async function serveFile(reqPath, res) {
   const clean = reqPath === "/" ? "/index.html" : reqPath;
   const target = path.normalize(path.join(__dirname, clean));
-  if (!target.startsWith(__dirname)) {
+  const rel = path.relative(__dirname, target);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
     sendJson(res, 400, { ok: false, error: "Invalid path" });
     return;
   }
@@ -537,7 +565,15 @@ async function serveFile(reqPath, res) {
     const ext = path.extname(target);
     const mime = MIME_TYPES[ext] || "application/octet-stream";
     const payload = await readFile(target);
-    res.writeHead(200, { "Content-Type": mime });
+    const isHtml = ext === ".html";
+    const cacheHeader = isHtml
+      ? "no-store, no-cache, must-revalidate"
+      : `public, max-age=${STATIC_CACHE_SECONDS}`;
+    res.writeHead(200, {
+      "Content-Type": mime,
+      "Cache-Control": cacheHeader,
+      "Last-Modified": fileInfo.mtime.toUTCString(),
+    });
     res.end(payload);
   } catch {
     sendJson(res, 404, { ok: false, error: "Not found" });
@@ -546,7 +582,22 @@ async function serveFile(reqPath, res) {
 
 async function handleApi(req, res, urlObj) {
   if (urlObj.pathname === "/api/health") {
-    sendJson(res, 200, { ok: true, status: "up", players: players.size, queue: queue.length });
+    sendJson(res, 200, {
+      ok: true,
+      status: shuttingDown ? "draining" : "up",
+      players: players.size,
+      queue: queue.length,
+      uptimeSec: Math.round(process.uptime()),
+    });
+    return;
+  }
+
+  if (urlObj.pathname === "/api/ready") {
+    if (shuttingDown) {
+      sendJson(res, 503, { ok: false, status: "draining" });
+      return;
+    }
+    sendJson(res, 200, { ok: true, status: "ready" });
     return;
   }
 
@@ -660,10 +711,17 @@ async function handleApi(req, res, urlObj) {
 }
 
 const server = http.createServer(async (req, res) => {
+  setSecurityHeaders(res);
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  res.setHeader("Cache-Control", "no-store");
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
 
   if (requestUrl.pathname.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     await handleApi(req, res, requestUrl);
     return;
   }
@@ -672,11 +730,50 @@ const server = http.createServer(async (req, res) => {
 });
 
 await loadRatings();
-setInterval(tickMatches, TICK_MS);
-setInterval(runMatchmaking, 1000);
-setInterval(cleanupStaleData, 5000);
+const tickTimer = setInterval(tickMatches, TICK_MS);
+const matchmakingTimer = setInterval(runMatchmaking, 1000);
+const cleanupTimer = setInterval(cleanupStaleData, 5000);
 
-server.listen(PORT, () => {
-  console.log(`Bounce Arena server listening on http://localhost:${PORT}`);
+function stopTimers() {
+  clearInterval(tickTimer);
+  clearInterval(matchmakingTimer);
+  clearInterval(cleanupTimer);
+}
+
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] signal=${signal} received, draining server...`);
+  stopTimers();
+
+  await new Promise((resolve) => {
+    server.close(() => resolve());
+    setTimeout(resolve, 10_000);
+  });
+
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  await saveRatings();
+  console.log("[shutdown] completed");
+  process.exit(0);
+}
+
+process.on("SIGINT", () => {
+  gracefulShutdown("SIGINT").catch((error) => {
+    console.error("[shutdown] failed", error);
+    process.exit(1);
+  });
 });
 
+process.on("SIGTERM", () => {
+  gracefulShutdown("SIGTERM").catch((error) => {
+    console.error("[shutdown] failed", error);
+    process.exit(1);
+  });
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`Bounce Arena server listening on http://${HOST}:${PORT}`);
+});

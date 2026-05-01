@@ -1,0 +1,22 @@
+[Unit]
+Description=Bounce Arena realtime game server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bounce-arena
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+Environment=NODE_ENV=production
+Environment=HOST=0.0.0.0
+Environment=PORT=4173
+Environment=DATA_DIR=/opt/bounce-arena/data
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

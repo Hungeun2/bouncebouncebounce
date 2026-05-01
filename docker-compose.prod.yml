@@ -1,0 +1,21 @@
+services:
+  bounce-arena:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bounce-arena
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4173
+      DATA_DIR: /app/data
+    volumes:
+      - bounce_arena_data:/app/data
+
+volumes:
+  bounce_arena_data:
